@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import random
+
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -9,15 +11,18 @@ import torch.optim as optim
 import torch.nn.init as init
 import torchaudio #for audio augmentation
 
+import cv2
+
 from sklearn.metrics import confusion_matrix
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-print(torch.cuda.is_available())
-print(torch.cuda.get_device_name(0))
-
+#print(torch.cuda.is_available())
+#print(torch.cuda.get_device_name(0))
+#set the device used
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #get metadata
 metadata_df = pd.read_csv('metadata.csv')
@@ -26,6 +31,29 @@ metadata_df = pd.read_csv('metadata.csv')
 train_df = metadata_df[metadata_df['split'] == 'train']
 val_df = metadata_df[metadata_df['split'] == 'val']
 test_df = metadata_df[metadata_df['split'] == 'test']
+
+#lookup dictionary for converting labels
+label_to_index = {label: index for index, label in enumerate(sorted(metadata_df['species'].unique()))}
+label_to_index['noise'] = len(label_to_index) 
+
+#directory where data is stored
+base_path = '/home/ldrich/Summer2025BHT/deep_learning/data_project_bird/flattened_npy_spectrograms/'
+#base_path = '/storage/courses/DSWorkflow_Copy/project_bird/flattened_npy_spectrograms/'
+
+#model hyperparameters
+learning_rate = 1e-4
+num_epochs = 100
+
+#dataset parameters
+batch_size = 64
+max_frames = 512 #max length of spectrograms: 256 ~ 3sec
+augment = True #should training data be augmented
+
+#collate function parameters
+chunk_size = 256
+stride = 64
+snr_threshold = 0.0001
+noise_label = label_to_index['noise']
 
 
 #Dataset class
@@ -64,14 +92,14 @@ class BirdSpectrogramDataset(Dataset):
 
 
         # Clip or pad
-        time_dim = spectrogram.shape[-1]
+        '''time_dim = spectrogram.shape[-1]
         if time_dim > self.max_frames:
             spectrogram = spectrogram[:, :, :self.max_frames]
         elif time_dim < self.max_frames:
             pad_amount = self.max_frames - time_dim
             pad = torch.zeros((1, 128, pad_amount), dtype=torch.float32)
             spectrogram = torch.cat((spectrogram, pad), dim=-1)
-
+        '''
 
         #normalize data
         mean = spectrogram.mean()
@@ -83,11 +111,81 @@ class BirdSpectrogramDataset(Dataset):
 
         return spectrogram, label
 
-#Custom collate function
-chunk_size = 512
-stride = 512
+#calculate the signal to noise ratio, used to infer whether bird song is present
+def signal2noise(spec):
 
-def chunk_collate_fn(batch, chunk_size=chunk_size, stride=stride):
+    if spec.dim() == 3 and spec.shape[0] == 1:
+        spec = spec[0]  # remove channel if it exists
+
+    #get working copy
+    spec = spec.clone()
+
+    #calculate median for columns and rows
+    col_median = spec.median(dim=0, keepdim=True).values
+    row_median = spec.median(dim=1, keepdim=True).values
+
+    # Binary threshold
+    spec[spec < row_median * 1.25] = 0.0
+    spec[spec < col_median * 1.15] = 0.0
+    spec[spec > 0] = 1.0
+
+    # Approximate median blur with 2D avg pooling
+    spec = spec.unsqueeze(0).unsqueeze(0)  # shape: [1, 1, freq, time]
+    spec = F.avg_pool2d(spec, kernel_size=3, stride=1, padding=1)
+    spec = (spec > 0.5).float()  # binarize again
+    spec = spec[0, 0]  # back to [freq, time]
+
+    # Morphological closing: dilate then erode
+    spec = spec.unsqueeze(0).unsqueeze(0)
+    dilated = F.max_pool2d(spec, kernel_size=3, stride=1, padding=1)
+    eroded = -F.max_pool2d(-dilated, kernel_size=3, stride=1, padding=1)
+    spec = eroded[0, 0]
+
+    # Final sum
+    spec_sum = spec.sum().item()
+    total_elements = spec.numel()
+
+    s2n = spec_sum / total_elements
+    
+    return s2n
+
+
+'''
+#calculate the signal to noise ratio, used to infer whether bird song is present
+def signal2noise(spec):
+
+    # Get working copy
+    spec = spec.copy()
+
+    # Calculate median for columns and rows
+    col_median = np.median(spec, axis=0, keepdims=True)
+    row_median = np.median(spec, axis=1, keepdims=True)
+
+    # Binary threshold
+    spec[spec < row_median * 1.25] = 0.0
+    spec[spec < col_median * 1.15] = 0.0
+    spec[spec > 0] = 1.0
+
+    # Median blur
+    spec = cv2.medianBlur(spec, 3)
+
+    # Morphology
+    spec = cv2.morphologyEx(spec, cv2.MORPH_CLOSE, np.ones((3, 3), np.float32))
+
+    # Sum of all values
+    spec_sum = spec.sum()
+
+    # Signal to noise ratio (higher is better)
+    try:
+        s2n = spec_sum / (spec.shape[0] * spec.shape[1] * spec.shape[2])
+    except:
+        s2n = spec_sum / (spec.shape[0] * spec.shape[1])
+
+    return s2n
+'''
+
+#Custom collate function
+def chunk_collate_fn(batch, chunk_size=chunk_size, stride=stride, snr_threshold=snr_threshold, noise_label=noise_label):
     
     all_chunks = []
     all_labels = []
@@ -100,15 +198,27 @@ def chunk_collate_fn(batch, chunk_size=chunk_size, stride=stride):
             # Pad the spectrogram on the time axis
             pad_width = chunk_size - time_length
             padded = F.pad(spectrogram, (0, pad_width))  # Pad last dim only
-            all_chunks.append(padded)
-            all_labels.append(label)
+            snr = signal2noise(padded) #get signal to noise ratio
+            if snr < snr_threshold:
+                if random.random() < 0.1:
+                    all_chunks.append(padded)
+                    all_labels.append(noise_label)
+            else:
+                all_chunks.append(padded)
+                all_labels.append(label)
         else:
             #create overlapping chunks of chunk_size with overlap based on stride
             for start in range(0, time_length - chunk_size + 1, stride):
                 end = start + chunk_size
                 current_chunk = spectrogram[:,:, start:end]
-                all_chunks.append(current_chunk)
-                all_labels.append(label)
+                snr = signal2noise(current_chunk) #get signal to noise ratio
+                if snr < snr_threshold:
+                    if random.random() < 0.1:
+                        all_chunks.append(current_chunk)
+                        all_labels.append(noise_label)
+                else:
+                    all_chunks.append(current_chunk)
+                    all_labels.append(label)
 
     if len(all_chunks) == 0:
         raise ValueError("No chunks created, Adjust chunk_size and stride")
@@ -118,9 +228,6 @@ def chunk_collate_fn(batch, chunk_size=chunk_size, stride=stride):
 
     return batched_chunks, labels
 
-
-#lookup dictionary for converting labels
-label_to_index = {label: index for index, label in enumerate(sorted(metadata_df['species'].unique()))}
 
 
 #Create the model architecture
@@ -179,20 +286,9 @@ class BirdCNN(nn.Module):
 
 
 
-
-#model hyperparameters
-learning_rate = 1e-4
-num_epochs = 100
-
-#dataset parameters
-batch_size = 64
-max_frames = 512 #max length of spectrograms: 256 ~ 3sec
-augment = True #should training data be augmented
-
-
 #get data loaders
 train_data = BirdSpectrogramDataset(train_df, 
-                                    base_path='/storage/courses/DSWorkflow_Copy/project_bird/flattened_npy_spectrograms/', 
+                                    base_path=base_path, 
                                     label_to_index=label_to_index,
                                     max_frames=max_frames,
                                     augment=augment)
@@ -202,12 +298,12 @@ train_loader = DataLoader(train_data,
                           shuffle=True, 
                           num_workers=1, 
                           pin_memory=True, 
-                          #collate_fn=chunk_collate_fn,
+                          collate_fn=chunk_collate_fn,
                           drop_last=False)
 
 
 val_data = BirdSpectrogramDataset(val_df, 
-                                  base_path='/storage/courses/DSWorkflow_Copy/project_bird/flattened_npy_spectrograms/', 
+                                  base_path=base_path, 
                                   label_to_index=label_to_index,
                                   max_frames=max_frames)
 
@@ -216,7 +312,7 @@ val_loader = DataLoader(val_data,
                         shuffle=True, 
                         num_workers=1, 
                         pin_memory=True, 
-                        #collate_fn=chunk_collate_fn,
+                        collate_fn=chunk_collate_fn,
                         drop_last=False)
 
 
@@ -227,15 +323,10 @@ def initialize_weights(m):
         if m.bias is not None:
             init.zeros_(m.bias)
 
-model = BirdCNN(num_classes = len(label_to_index))
+model = BirdCNN(num_classes = len(label_to_index)).to(device)
 model.apply(initialize_weights)  # Apply recursively to all layers
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate, amsgrad=True, weight_decay=1e-4) #!!!try weight_decay and amsgrad
-
-
-#set the device used
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
 
 
 #train the model
