@@ -78,7 +78,6 @@ def get_dataloader(dataframe, batch_size, label_to_index, max_frames, augment):
                             shuffle=True, 
                             num_workers=1, 
                             pin_memory=True, 
-                            collate_fn=collate_fn,
                             drop_last=False)
 
     return dataloader
