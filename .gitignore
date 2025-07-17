@@ -1,0 +1,3 @@
+# Ignore a specific folder and everything inside it
+data/processed_audio/
+data/raw_audio/
