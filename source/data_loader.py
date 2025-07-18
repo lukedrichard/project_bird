@@ -65,10 +65,10 @@ class BirdSpectrogramDataset(Dataset):
 
 
 #get data loaders
-def get_dataloader(dataframe, batch_size, label_to_index, max_frames, augment):
+def get_dataloader(dataframe, base_path, batch_size, label_to_index, max_frames, augment):
     
     dataset = BirdSpectrogramDataset(dataframe, 
-                                    base_path='/storage/courses/DSWorkflow_Copy/project_bird/flattened_npy_spectrograms/', 
+                                    base_path=base_path, 
                                     label_to_index=label_to_index,
                                     max_frames=max_frames,
                                     augment=augment)

@@ -24,17 +24,13 @@ def train_model(model, num_epochs, train_loader, val_loader, device, optimizer, 
 
     #confusion matrix, precision, recall, f1
     accuracy = Accuracy(task='multiclass', num_classes=output_dim, average='micro').to(device)
-    precision = Precision(task='multiclass',num_classes=output_dim,average='weighted').to(device)
-    recall = Recall(task='multiclass',num_classes=output_dim,average='weighted').to(device)
-    f1 = F1Score(task='multiclass',num_classes=output_dim,average='weighted').to(device)
-    roc_auc = MulticlassAUROC(num_classes=output_dim, average='weighted').to(device)
 
     for epoch in range(num_epochs):
         # Training
         model.train()
         running_loss = 0.0
-        correct = 0
-        total = 0
+        #correct = 0
+        #total = 0
 
         for inputs, targets in train_loader:
             inputs = inputs.to(device)
@@ -63,8 +59,8 @@ def train_model(model, num_epochs, train_loader, val_loader, device, optimizer, 
         # Validation
         model.eval()
         val_loss = 0.0
-        val_correct = 0
-        val_total = 0
+        #val_correct = 0
+        #val_total = 0
 
         accuracy.reset()
 
