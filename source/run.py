@@ -18,7 +18,7 @@ from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from data_loader import get_dataloader, collate_fn
+from data_loader import get_dataloader
 from cnn_architecture import get_BirdCNN
 from trainer import train_model
 
@@ -27,7 +27,7 @@ from trainer import train_model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #get metadata
-metadata_df = pd.read_csv('metadata.csv')
+metadata_df = pd.read_csv('../data/metadata/metadata.csv')
 
 #reconstruct train/val/test sets
 train_df = metadata_df[metadata_df['split'] == 'train']
@@ -36,10 +36,10 @@ test_df = metadata_df[metadata_df['split'] == 'test']
 
 #lookup dictionary for converting labels
 label_to_index = {label: index for index, label in enumerate(sorted(metadata_df['species'].unique()))}
-label_to_index['noise'] = len(label_to_index) 
+#label_to_index['noise'] = len(label_to_index) 
 
 #directory where data is stored
-base_path = '/home/ldrich/Summer2025BHT/deep_learning/data_project_bird/flattened_npy_spectrograms/'
+base_path = '../data/processed_audio/flattened_npy_spectrograms/'
 #base_path = '/storage/courses/DSWorkflow_Copy/project_bird/flattened_npy_spectrograms/'
 
 #model hyperparameters
@@ -52,17 +52,10 @@ batch_size = 64
 max_frames = 512 #max length of spectrograms: 256 ~ 3sec
 augment = True #should training data be augmented
 
-#collate function parameters
-chunk_size = 256
-stride = 64
-snr_threshold = 0.0001
-noise_label = label_to_index['noise']
 
-#collate object, need to pass it's function to dataloader
-custom_collate_fn = collate_fn(chunk_size, stride, snr_threshold, noise_label)
 
-train_loader = get_dataloader(train_df, batch_size, label_to_index, max_frames, augment)
-val_loader = get_dataloader(val_df, batch_size, label_to_index, max_frames, augment)
+train_loader = get_dataloader(train_df, base_path, batch_size, label_to_index, max_frames, augment)
+val_loader = get_dataloader(val_df, base_path, batch_size, label_to_index, max_frames, augment)
 
 #instantiate model, initialize weights with xavier_uniform method
 def initialize_weights(m):
