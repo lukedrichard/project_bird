@@ -37,7 +37,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #paths for chunked spectrograms
 chunk_metadata_path = "../data/metadata/128f_chunk_metadata.csv"
 base_path = '' #don't need metadata has full paths
-results_dir = '../results/test_run/'
+results_dir = '../results/final_chunk_model/'
 noise_dir = "../data/processed_audio/128f_chunked_spectrograms/noise"
 noise_paths = [os.path.join(noise_dir, f) for f in os.listdir(noise_dir) if f.endswith('.npy')]
 chunk_base_path = '../data/processed_audio/128f_chunked_spectrograms'
@@ -79,8 +79,8 @@ num_classes = len(label_to_index)
 
 #dataset parameters
 batch_size = 1
-#max_frames = 512 #max length of spectrograms: 256 ~ 3sec
-max_frames = 128 #all chunks are 128 frames ~ 1.5sec
+max_frames = 512 #max length of spectrograms: 256 ~ 3sec
+#max_frames = 128 #all chunks are 128 frames ~ 1.5sec
 augment = True #should training data be augmented
 
 #train_loader = get_dataloader(chunk_train_df, base_path, noise_paths, batch_size, label_to_index, max_frames, augment)
@@ -121,5 +121,6 @@ chunk_evaluate(device, model, data_loader=val_loader, results_dir=results_dir + 
 # Save the model
 torch.save(model, results_dir + 'ChunkyBaseBird.pth')
 
-#test_loader = get_chunk_dataloader(eval_test_df, chunk_base_path, label_to_index, batch_size=1)
-#chunk_evaluate(device, model, data_loader=test_loader, results_dir=results_dir + 'test_', label_to_index=label_to_index)
+# !!! for final testing only
+test_loader = get_chunk_dataloader(eval_test_df, chunk_base_path, noise_paths, mix_paths, label_to_index, batch_size=1, augment=False)
+chunk_evaluate(device, model, data_loader=test_loader, results_dir=results_dir + 'test_', label_to_index=label_to_index)

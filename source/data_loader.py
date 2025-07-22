@@ -192,20 +192,21 @@ class ChunkSpectrogramDataset(Dataset):
         for f in chunk_files:
             spectrogram = np.load(f)
             
-            spectrogram = self.apply_augmentation(spectrogram, label_onehot) # Apply augmentation to chunk here
+            spectrogram = self.apply_augmentation(spectrogram, label_onehot, p=0.5) # Apply augmentation to chunk here
             spectrogram = torch.tensor(spectrogram, dtype=torch.float32).unsqueeze(0) # shape: [1, 128, time]
+            spectrogram = self.apply_masking(spectrogram, mask_percent=0.1, p=0.5)
             spectrogram = self.normalize(spectrogram) # normalize the spectrograms for training
             inputs.append(spectrogram) 
 
         return inputs, label_idx, label_onehot  # inputs is a list of tensors
 
-    def apply_augmentation(self, spectrogram, label_onehot):
+    def apply_augmentation(self, spectrogram, label_onehot, p):
         if self.augment:
-            spectrogram, label_onehot = self.mixup(spectrogram, label_onehot, alpha=1.0, p=0.5)
-            spectrogram = self.inject_background_noise(spectrogram, blend_factor=0.5, p=0.5)
-            spectrogram = self.inject_gaussian_noise(spectrogram, mean=0, min_std=0.05, max_std=0.05, p=0.5)
-            spectrogram = self.vertical_roll(spectrogram, vertical=0.05, p=0.5)
-            spectrogram = self.apply_gain(spectrogram, min_gain_db=-12.0, max_gain_db=12.0, p=0.5)
+            spectrogram, label_onehot = self.mixup(spectrogram, label_onehot, alpha=1.0, p=p)
+            spectrogram = self.inject_background_noise(spectrogram, blend_factor=0.5, p=p)
+            spectrogram = self.inject_gaussian_noise(spectrogram, mean=0, min_std=0.05, max_std=0.05, p=p)
+            spectrogram = self.vertical_roll(spectrogram, vertical=0.05, p=p)
+            spectrogram = self.apply_gain(spectrogram, min_gain_db=-12.0, max_gain_db=12.0, p=p)
         return spectrogram
 
     def mixup(self, spectrogram, label_onehot, alpha=1.0, p=0.5):
@@ -279,6 +280,21 @@ class ChunkSpectrogramDataset(Dataset):
             return spectrogram * gain_linear
         return spectrogram
 
+    def apply_masking(self, spectrogram, mask_percent=0.1, p=0.5):
+        """Takes spectrogram as tensor. Applies masking from torchaudio library"""
+        width = spectrogram.shape[-1]
+        if random.random() < p:
+            time_mask_param = mask_percent * width
+            freq_mask_param = mask_percent * 128
+
+            time_mask = torchaudio.transforms.TimeMasking(time_mask_param=time_mask_param)
+            freq_mask = torchaudio.transforms.FrequencyMasking(freq_mask_param=freq_mask_param)
+
+            spectrogram = freq_mask(spectrogram)
+            spectrogram = time_mask(spectrogram)
+
+        return spectrogram
+            
     def normalize(self, spectrogram):
         #normalize data
         mean = spectrogram.mean()

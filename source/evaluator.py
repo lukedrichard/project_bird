@@ -120,7 +120,8 @@ def chunk_evaluate(device, model, data_loader, results_dir, label_to_index):
 
             outputs = model(inputs)
 
-            pooled_outputs = outputs.mean(dim=0)
+            pooled_outputs = outputs.mean(dim=0) # mean prediction pooling
+            #pooled_outputs = ((outputs*2)**2).mean(dim=0) # mean exponential pooling
             log_avg_probs = nn.functional.log_softmax(pooled_outputs, dim=0)
 
             #probs = nn.functional.softmax(outputs, dim=1)

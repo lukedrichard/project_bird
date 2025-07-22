@@ -11,6 +11,8 @@ import torch.nn.init as init
 import torchaudio #for audio augmentation
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score, MulticlassAUROC, ConfusionMatrix
 
+from warmup_scheduler import GradualWarmupScheduler
+
 from sklearn.metrics import confusion_matrix
 
 import seaborn as sns
@@ -155,8 +157,11 @@ def train_model(model, num_epochs, train_loader, val_loader, device, optimizer, 
 
 def train_chunk_model(model, num_epochs, train_loader, val_loader, device, optimizer, criterion, output_dim, results_dir):
     # Cosine Annealing over 100 epochs
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=40) #eta_min=0
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50) #eta_min=0
     #scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=5,T_mult=1,eta_min=0)
+    #scheduler = GradualWarmupScheduler(optimizer, multiplier=1.0, total_epoch=10, after_scheduler=cosine_scheduler)
+    
 
     #train the model
     train_losses = []
@@ -168,7 +173,7 @@ def train_chunk_model(model, num_epochs, train_loader, val_loader, device, optim
     accuracy = Accuracy(task='multiclass', num_classes=output_dim, average='micro').to(device)
 
     #early stopping variabels
-    patience = 3
+    patience = 5
     best_val_loss = float('inf')
     epochs_no_improve = 0
     best_model_state = copy.deepcopy(model.state_dict())
@@ -193,7 +198,8 @@ def train_chunk_model(model, num_epochs, train_loader, val_loader, device, optim
             #loss = criterion(log_probs, targets_onehot) #for single clips
 
             #for chunks
-            pooled_outputs = outputs.mean(dim=0)
+            pooled_outputs = outputs.mean(dim=0) #mean prediction pooling
+            #pooled_outputs = ((outputs*2)**2).mean(dim=0) #mean exponential pooling
             log_avg_probs = F.log_softmax(pooled_outputs, dim=0)
             loss = criterion(log_avg_probs, targets_onehot)
 
